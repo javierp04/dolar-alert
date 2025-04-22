@@ -8,6 +8,9 @@ class Configuracion extends CI_Controller
     {
         parent::__construct();
         $this->load->helper('telegram');
+        
+        // Cargar modelos necesarios
+        $this->load->model('SourceReliability_model');
     }
 
     public function index()
@@ -41,6 +44,9 @@ class Configuracion extends CI_Controller
         foreach ($query->result() as $row) {
             $cotizaciones[$row->tipo] = $row->venta;
         }
+
+        // Obtener resumen de fiabilidad de fuentes
+        $data['fiabilidad_fuentes'] = $this->SourceReliability_model->obtenerResumenFiabilidad();
 
         // Separar el dólar Cocos (no se muestra en la tabla pero se usa como referencia)
         $cocos = null;
@@ -142,6 +148,7 @@ class Configuracion extends CI_Controller
         $this->form_validation->set_rules('codigo', 'Código', 'required|trim|alpha_dash');
         $this->form_validation->set_rules('nombre', 'Nombre', 'required|trim');
         $this->form_validation->set_rules('umbral_diferencia', 'Umbral de diferencia', 'required|numeric|greater_than[0]');
+        $this->form_validation->set_rules('fuente_preferida', 'Fuente preferida', 'required|trim');
 
         if ($this->form_validation->run() === FALSE) {
             $this->session->set_flashdata('error', validation_errors());
@@ -154,6 +161,7 @@ class Configuracion extends CI_Controller
             'codigo' => $this->input->post('codigo'),
             'nombre' => $this->input->post('nombre'),
             'umbral_diferencia' => $this->input->post('umbral_diferencia'),
+            'fuente_preferida' => $this->input->post('fuente_preferida'),
             'habilitado' => 1
         ];
 
@@ -197,6 +205,30 @@ class Configuracion extends CI_Controller
         redirect('configuracion/dolares');
     }
 
+    public function actualizar_fuente_dolar()
+    {
+        // Obtener datos del formulario
+        $id = $this->input->post('id');
+        $fuente_preferida = $this->input->post('fuente_preferida');
+        
+        if (!$id || !$fuente_preferida) {
+            $this->output->set_content_type('application/json')
+                 ->set_output(json_encode(['success' => false, 'message' => 'Parámetros incompletos']));
+            return;
+        }
+        
+        // Actualizar fuente preferida
+        $resultado = $this->Dolar_model->actualizar_fuente_preferida($id, $fuente_preferida);
+        
+        if ($resultado) {
+            $this->output->set_content_type('application/json')
+                 ->set_output(json_encode(['success' => true, 'message' => 'Fuente actualizada correctamente']));
+        } else {
+            $this->output->set_content_type('application/json')
+                 ->set_output(json_encode(['success' => false, 'message' => 'Error al actualizar la fuente']));
+        }
+    }
+
     public function eliminar_dolar($id)
     {
         $resultado = $this->Dolar_model->eliminar_dolar($id);
@@ -208,5 +240,55 @@ class Configuracion extends CI_Controller
         }
 
         redirect('configuracion/dolares');
+    }
+    
+    public function fiabilidad_fuentes()
+    {
+        $data['title'] = 'Fiabilidad de Fuentes - Monitor de Dólares';
+
+        // Obtener resumen de fiabilidad
+        $data['resumen_fiabilidad'] = $this->SourceReliability_model->obtenerResumenFiabilidad();
+        
+        // Obtener detalles de fiabilidad por banco
+        $dolares = $this->Dolar_model->obtener_dolares();
+        $fiabilidad_detallada = [];
+        
+        foreach ($dolares as $dolar) {
+            if ($dolar->codigo === 'cocos') continue;
+            
+            $fiabilidad_criptoya = $this->SourceReliability_model->obtenerFiabilidad('criptoya', $dolar->codigo);
+            $fiabilidad_infodolar = $this->SourceReliability_model->obtenerFiabilidad('infodolar', $dolar->codigo);
+            
+            $fiabilidad_detallada[] = [
+                'codigo' => $dolar->codigo,
+                'nombre' => $dolar->nombre,
+                'fuente_preferida' => $dolar->fuente_preferida,
+                'fiabilidad_criptoya' => $fiabilidad_criptoya,
+                'fiabilidad_infodolar' => $fiabilidad_infodolar
+            ];
+        }
+        
+        $data['fiabilidad_detallada'] = $fiabilidad_detallada;
+        
+        // Cargar vistas
+        $this->load->view('templates/header', $data);
+        $this->load->view('configuracion/fiabilidad_fuentes', $data);
+        $this->load->view('templates/footer');
+    }
+    
+    public function optimizar_fuentes()
+    {
+        require_once APPPATH . 'libraries/DataSources/DataSourceAggregator.php';
+        
+        $aggregator = new DataSourceAggregator();
+        $bancos_actualizados = $aggregator->actualizarFuentesPreferidas();
+        
+        if ($bancos_actualizados > 0) {
+            $this->session->set_flashdata('success', "Se actualizaron las fuentes preferidas de $bancos_actualizados bancos según fiabilidad histórica.");
+        } else {
+            $this->session->set_flashdata('info', "No se requirieron cambios en las fuentes preferidas.");
+        }
+        
+        redirect('configuracion/fiabilidad_fuentes');
     }
 }

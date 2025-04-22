@@ -44,3 +44,49 @@ body {
     width: 100%;
     margin-bottom: 15px;
 }
+
+/* Estilos para fuentes de datos */
+.fuente-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 5px;
+}
+.fuente-criptoya {
+    background-color: #6f42c1;
+    color: white;
+}
+.fuente-infodolar {
+    background-color: #20c997;
+    color: white;
+}
+.fuente-fallback {
+    background-color: #fd7e14;
+    color: white;
+}
+
+/* Estilos para las tarjetas de fiabilidad */
+.fiabilidad-card {
+    transition: all 0.2s ease-in-out;
+}
+.fiabilidad-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+/* Estilos para selectores de fuente preferida */
+.fuente-preferida {
+    font-size: 0.875rem;
+    height: calc(1.5em + 0.5rem + 2px);
+    padding: 0.25rem 0.5rem;
+}
+
+/* Animación para actualizaciones */
+@keyframes highlight {
+    0% { background-color: rgba(255, 255, 0, 0.3); }
+    100% { background-color: transparent; }
+}
+.highlight-update {
+    animation: highlight 2s;
+}

@@ -28,6 +28,7 @@
                                 <th>Nombre</th>
                                 <th>Último Precio</th>
                                 <th>Umbral (%)</th>
+                                <th>Fuente</th>
                                 <th>Estado</th>
                                 <th class="text-center">Acciones</th>
                             </tr>
@@ -47,6 +48,14 @@
                                         </td>
                                         <td><?= number_format($dolar->umbral_diferencia, 2, ',', '.') ?>%</td>
                                         <td>
+                                            <select class="form-select form-select-sm fuente-preferida" 
+                                                    data-id="<?= $dolar->id ?>"
+                                                    <?= $dolar->habilitado ? '' : 'disabled' ?>>
+                                                <option value="criptoya" <?= $dolar->fuente_preferida == 'criptoya' ? 'selected' : '' ?>>CriptoYa</option>
+                                                <option value="infodolar" <?= $dolar->fuente_preferida == 'infodolar' ? 'selected' : '' ?>>InfoDolar</option>
+                                            </select>
+                                        </td>
+                                        <td>
                                             <div class="form-check form-switch">
                                                 <input class="form-check-input" type="checkbox" id="switch-<?= $dolar->id ?>" 
                                                     <?= $dolar->habilitado ? 'checked' : '' ?> 
@@ -58,7 +67,7 @@
                                         </td>
                                         <td class="text-center">
                                             <div class="btn-group">
-                                                <button class="btn btn-sm btn-primary" onclick="editarDolar(<?= $dolar->id ?>, '<?= $dolar->codigo ?>', '<?= $dolar->nombre ?>', <?= $dolar->umbral_diferencia ?>)" data-bs-toggle="modal" data-bs-target="#modalDolar">
+                                                <button class="btn btn-sm btn-primary" onclick="editarDolar(<?= $dolar->id ?>, '<?= $dolar->codigo ?>', '<?= $dolar->nombre ?>', <?= $dolar->umbral_diferencia ?>, '<?= $dolar->fuente_preferida ?>')" data-bs-toggle="modal" data-bs-target="#modalDolar">
                                                     <i class="bi bi-pencil"></i>
                                                 </button>
                                                 <button class="btn btn-sm btn-danger" onclick="confirmarEliminar(<?= $dolar->id ?>, '<?= $dolar->nombre ?>')">
@@ -72,11 +81,55 @@
                             
                             <?php if (empty($dolares)): ?>
                                 <tr>
-                                    <td colspan="6" class="text-center">No hay dólares de bancos configurados.</td>
+                                    <td colspan="7" class="text-center">No hay dólares de bancos configurados.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-graph-up"></i> Fiabilidad de Fuentes
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <?php if (!empty($fiabilidad_fuentes)): ?>
+                        <?php foreach ($fiabilidad_fuentes as $fuente): ?>
+                            <div class="col-md-6">
+                                <div class="card mb-3 <?= $fuente->tasa_exito_promedio > 0.9 ? 'border-success' : 'border-warning' ?>">
+                                    <div class="card-header">
+                                        <h6 class="mb-0"><?= ucfirst($fuente->fuente) ?></h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Tasa de éxito:</strong> <?= number_format($fuente->tasa_exito_promedio * 100, 1) ?>%</p>
+                                        <p><strong>Precisión:</strong> <?= number_format($fuente->precision_promedio * 100, 1) ?>%</p>
+                                        <p><strong>Tiempo de respuesta:</strong> <?= number_format($fuente->tiempo_respuesta_promedio, 0) ?>ms</p>
+                                        <p><strong>Bancos disponibles:</strong> <?= $fuente->total_bancos ?></p>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="col-12">
+                            <div class="alert alert-info">
+                                No hay datos de fiabilidad disponibles. Se generarán automáticamente con las consultas.
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <div class="mt-3">
+                    <a href="<?= site_url('configuracion/fiabilidad_fuentes') ?>" class="btn btn-primary">
+                        <i class="bi bi-bar-chart"></i> Ver Estadísticas Detalladas
+                    </a>
+                    <a href="<?= site_url('configuracion/optimizar_fuentes') ?>" class="btn btn-success">
+                        <i class="bi bi-magic"></i> Optimizar Fuentes Automáticamente
+                    </a>
                 </div>
             </div>
         </div>
@@ -94,12 +147,28 @@
                 <p>El dólar Cocos de DolarYa es utilizado como base para todas las comparaciones:</p>
                 <?php 
                 // Mostrar los valores actuales del dólar Cocos
-                if ($cocos && isset($cotizaciones['cocos'])):
+                if ($cocos):
+                    $cocos_compra = 0;
+                    $cocos_venta = 0;
+                    
+                    // Obtener última cotización de Cocos
+                    $query = $this->db->select('compra, venta')
+                        ->from('cotizaciones')
+                        ->where('tipo', 'cocos')
+                        ->order_by('fecha_hora', 'DESC')
+                        ->limit(1)
+                        ->get();
+                    
+                    if ($query->num_rows() > 0) {
+                        $cocos_row = $query->row();
+                        $cocos_compra = $cocos_row->compra;
+                        $cocos_venta = $cocos_row->venta;
+                    }
                 ?>
                 <div class="alert alert-success">
                     <strong>Dólar Cocos:</strong><br>
-                    Compra: $<?= number_format($cotizaciones['cocos_compra'] ?? 0, 2, ',', '.') ?><br>
-                    Venta: $<?= number_format($cotizaciones['cocos'] ?? 0, 2, ',', '.') ?>
+                    Compra: $<?= number_format($cocos_compra, 2, ',', '.') ?><br>
+                    Venta: $<?= number_format($cocos_venta, 2, ',', '.') ?>
                 </div>
                 <?php else: ?>
                 <div class="alert alert-warning">No hay datos recientes del dólar Cocos.</div>
@@ -110,6 +179,17 @@
                 
                 <h5 class="card-title mt-3">Ordenamiento</h5>
                 <p>La tabla muestra primero los dólares habilitados ordenados de menor a mayor precio, seguidos por los deshabilitados.</p>
+                
+                <h5 class="card-title mt-3">Múltiples Fuentes</h5>
+                <p>El sistema ahora soporta múltiples fuentes de datos:</p>
+                <ul>
+                    <li><strong>CriptoYa</strong>: La fuente original que ofrece datos en tiempo real de la mayoría de los bancos.</li>
+                    <li><strong>InfoDolar</strong>: Nueva fuente alternativa que puede ofrecer datos diferentes para algunos bancos.</li>
+                </ul>
+                <p>Puede seleccionar la fuente preferida para cada banco. El sistema usará automáticamente la otra fuente como respaldo si la preferida falla.</p>
+                
+                <h5 class="card-title mt-3">Auto-aprendizaje</h5>
+                <p>El sistema registra la fiabilidad de cada fuente y puede optimizar automáticamente la selección de fuentes según el rendimiento histórico.</p>
             </div>
         </div>
     </div>
@@ -144,6 +224,15 @@
                         <input type="number" class="form-control" id="umbral_diferencia" name="umbral_diferencia" 
                                min="0.01" step="0.01" value="1.00" required>
                         <div class="form-text">Porcentaje mínimo de diferencia para enviar alertas.</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="fuente_preferida" class="form-label">Fuente Preferida</label>
+                        <select class="form-select" id="fuente_preferida" name="fuente_preferida" required>
+                            <option value="criptoya">CriptoYa (API)</option>
+                            <option value="infodolar">InfoDolar (Web)</option>
+                        </select>
+                        <div class="form-text">Fuente de datos principal para este banco. Se usará la otra como respaldo.</div>
                     </div>
                 </form>
             </div>
@@ -183,12 +272,13 @@ function limpiarFormulario() {
     document.getElementById('codigo').disabled = false;
 }
 
-function editarDolar(id, codigo, nombre, umbral) {
+function editarDolar(id, codigo, nombre, umbral, fuente_preferida) {
     document.getElementById('modalTitle').textContent = 'Editar Dólar';
     document.getElementById('id').value = id;
     document.getElementById('codigo').value = codigo;
     document.getElementById('nombre').value = nombre;
     document.getElementById('umbral_diferencia').value = umbral;
+    document.getElementById('fuente_preferida').value = fuente_preferida;
 }
 
 function confirmarEliminar(id, nombre) {
@@ -203,4 +293,60 @@ function cambiarEstado(id, estado) {
     // Redirigir a la misma URL que usábamos antes
     window.location.href = "<?= site_url('configuracion/dolar/estado/') ?>" + id;
 }
+
+// Inicializar evento para selectores de fuente preferida
+document.addEventListener('DOMContentLoaded', function() {
+    const selectores = document.querySelectorAll('.fuente-preferida');
+    
+    selectores.forEach(selector => {
+        selector.addEventListener('change', function() {
+            const dolarId = this.getAttribute('data-id');
+            const fuentePreferida = this.value;
+            
+            // Llamada AJAX para actualizar la fuente preferida
+            fetch('<?= site_url('configuracion/actualizar_fuente_dolar') ?>', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'id=' + dolarId + '&fuente_preferida=' + fuentePreferida
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Mostrar notificación de éxito
+                    const toast = document.createElement('div');
+                    toast.className = 'position-fixed bottom-0 end-0 p-3';
+                    toast.style.zIndex = 5;
+                    toast.innerHTML = `
+                        <div class="toast align-items-center text-white bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                            <div class="d-flex">
+                                <div class="toast-body">
+                                    <i class="bi bi-check-circle"></i> Fuente actualizada correctamente
+                                </div>
+                                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(toast);
+                    
+                    const toastEl = document.querySelector('.toast');
+                    const bsToast = new bootstrap.Toast(toastEl, { autohide: true, delay: 3000 });
+                    bsToast.show();
+                    
+                    // Eliminar el toast del DOM después de ocultarse
+                    toastEl.addEventListener('hidden.bs.toast', function () {
+                        document.body.removeChild(toast);
+                    });
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al actualizar la fuente preferida');
+            });
+        });
+    });
+});
 </script>

@@ -1,11 +1,18 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
 
+require_once APPPATH . 'libraries/DataSources/DataSourceAggregator.php';
+
 class Dashboard extends CI_Controller {
+    
+    protected $dataSourceAggregator;
     
     public function __construct() {
         parent::__construct();
         $this->load->library('WebScraper');
+        
+        // Inicializar el agregador de fuentes de datos
+        $this->dataSourceAggregator = new DataSourceAggregator();
     }
     
     public function index() {
@@ -67,6 +74,9 @@ class Dashboard extends CI_Controller {
         
         // Obtener configuraciones
         $data['config'] = $this->Configuracion_model->obtener_configuraciones();
+        
+        // Obtener resumen de fuentes utilizadas
+        $data['fuentes_utilizadas'] = $this->obtener_resumen_fuentes_utilizadas();
         
         // Cargar vistas
         $this->load->view('templates/header', $data);
@@ -139,6 +149,7 @@ class Dashboard extends CI_Controller {
         // Preparar datos para la vista
         $data['ultimas_cotizaciones'] = $todas_ordenadas;
         $data['cocos'] = $cocos;
+        $data['fuentes_utilizadas'] = $this->obtener_resumen_fuentes_utilizadas();
         
         // Cargar vista parcial y devolverla como HTML
         $html = $this->load->view('dashboard/partials/tabla_cotizaciones', $data, TRUE);
@@ -147,6 +158,30 @@ class Dashboard extends CI_Controller {
         $this->output
             ->set_content_type('application/json')
             ->set_output(json_encode(['html' => $html]));
+    }
+    
+    /**
+     * Obtiene un resumen de las fuentes utilizadas para la última cotización de cada banco
+     * 
+     * @return array Array con información de fuentes utilizadas
+     */
+    private function obtener_resumen_fuentes_utilizadas() {
+        $query = $this->db->query("
+            SELECT 
+                cl.fuente_origen, 
+                COUNT(cl.tipo) AS total_bancos,
+                SUM(CASE WHEN cl.fallback_usado = 1 THEN 1 ELSE 0 END) AS fallbacks_usados
+            FROM cotizaciones_log cl
+            JOIN (
+                SELECT tipo, MAX(fecha_hora) AS ultima_fecha
+                FROM cotizaciones_log
+                GROUP BY tipo
+            ) ultimo ON cl.tipo = ultimo.tipo AND cl.fecha_hora = ultimo.ultima_fecha
+            WHERE cl.tipo != 'cocos'
+            GROUP BY cl.fuente_origen
+        ");
+        
+        return $query->result();
     }
     
     /**
@@ -188,7 +223,10 @@ class Dashboard extends CI_Controller {
             'bna' => ['rgba(255, 159, 64, 1)', 'rgba(255, 159, 64, 0.2)'],
             'hsbc' => ['rgba(75, 75, 75, 1)', 'rgba(75, 75, 75, 0.2)'],
             'ciudad' => ['rgba(50, 168, 82, 1)', 'rgba(50, 168, 82, 0.2)'],
-            'bapro' => ['rgba(138, 43, 226, 1)', 'rgba(138, 43, 226, 0.2)']
+            'bapro' => ['rgba(138, 43, 226, 1)', 'rgba(138, 43, 226, 0.2)'],
+            'hipotecario' => ['rgba(255, 127, 80, 1)', 'rgba(255, 127, 80, 0.2)'],
+            'icbc' => ['rgba(233, 150, 122, 1)', 'rgba(233, 150, 122, 0.2)'],
+            'supervielle' => ['rgba(143, 188, 143, 1)', 'rgba(143, 188, 143, 0.2)']
         ];
     
         // Obtener los tipos con su último precio de venta
@@ -277,6 +315,23 @@ class Dashboard extends CI_Controller {
             $this->session->set_flashdata('success', 'Cotizaciones consultadas correctamente.');
         } else {
             $this->session->set_flashdata('error', 'Error al consultar cotizaciones. Revise los logs para más información.');
+        }
+        
+        redirect('dashboard');
+    }
+    
+    /**
+     * Endpoint para actualizar todas las cotizaciones
+     * Usar para probar múltiples fuentes de datos
+     */
+    public function actualizar_todas() {
+        // Consultar todas las fuentes y actualizar la base de datos
+        $cotizaciones_criptoya = $this->dataSourceAggregator->consultarTodasLasFuentes();
+        
+        if (!empty($cotizaciones_criptoya) && !empty($cotizaciones_criptoya['criptoya']) && !empty($cotizaciones_criptoya['infodolar'])) {
+            $this->session->set_flashdata('success', 'Todas las fuentes consultadas correctamente:<br>CriptoYa: ' . count($cotizaciones_criptoya['criptoya']) . ' bancos.<br>InfoDolar: ' . count($cotizaciones_criptoya['infodolar']) . ' bancos.');
+        } else {
+            $this->session->set_flashdata('error', 'Error al consultar cotizaciones de algunas fuentes.');
         }
         
         redirect('dashboard');

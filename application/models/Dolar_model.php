@@ -73,4 +73,35 @@ class Dolar_model extends CI_Model {
         $this->db->where('habilitado', 1);
         return $this->db->get('dolares_habilitados')->result();
     }
+    
+    /**
+     * Actualiza la fuente preferida para un dólar
+     * 
+     * @param int $id ID del dólar
+     * @param string $fuente_preferida Nombre de la fuente preferida
+     * @return bool Resultado de la operación
+     */
+    public function actualizar_fuente_preferida($id, $fuente_preferida) {
+        $this->db->where('id', $id);
+        $this->db->update('dolares_habilitados', ['fuente_preferida' => $fuente_preferida]);
+        return $this->db->affected_rows() > 0;
+    }
+    
+    /**
+     * Obtiene resumen de fuentes preferidas por los dólares
+     * 
+     * @return array Resumen de fuentes preferidas
+     */
+    public function obtener_resumen_fuentes_preferidas() {
+        $query = $this->db->query("
+            SELECT 
+                fuente_preferida,
+                COUNT(*) as total_dolares
+            FROM dolares_habilitados
+            WHERE codigo != 'cocos'
+            GROUP BY fuente_preferida
+        ");
+        
+        return $query->result();
+    }
 }

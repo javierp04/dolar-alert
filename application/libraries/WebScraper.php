@@ -1,15 +1,18 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
 
+require_once APPPATH . 'libraries/DataSources/DataSourceAggregator.php';
+
 /**
  * WebScraper Library
  * Obtiene cotizaciones de dólar de diferentes fuentes:
  * - DolarYa.info para Dólar Cocos (mediante scraping)
- * - CriptoYa API para otros dólares de bancos
+ * - Múltiples fuentes para otros dólares de bancos
  */
 class WebScraper
 {
     protected $CI;
+    protected $dataSourceAggregator;
 
     public function __construct()
     {
@@ -19,6 +22,9 @@ class WebScraper
         $this->CI->load->model('Dolar_model');
         $this->CI->load->helper('telegram');
         $this->CI->load->database();
+        
+        // Inicializar el agregador de fuentes de datos
+        $this->dataSourceAggregator = new DataSourceAggregator();
     }
 
     /**
@@ -34,16 +40,16 @@ class WebScraper
             return FALSE;
         }
 
-        // 2. Obtener otros dólares habilitados de CriptoYa
-        $otros_dolares = $this->consultar_criptoya();
+        // 2. Obtener otros dólares habilitados de múltiples fuentes
+        $cotizaciones_unificadas = $this->dataSourceAggregator->obtenerCotizacionesUnificadas();
 
-        if (!$otros_dolares) {
-            log_message('error', "No se pudo obtener cotizaciones de CriptoYa");
+        if (empty($cotizaciones_unificadas)) {
+            log_message('error', "No se pudieron obtener cotizaciones de ninguna fuente");
             return FALSE;
         }
 
         // 3. Verificar si hay cambios en las cotizaciones
-        $hay_cambios = $this->verificar_cambios_cotizaciones($cocos, $otros_dolares);
+        $hay_cambios = $this->verificar_cambios_cotizaciones($cocos, $cotizaciones_unificadas);
         
         if ($hay_cambios) {
             log_message('info', "Se detectaron cambios en las cotizaciones. Actualizando todas las cotizaciones.");
@@ -60,10 +66,10 @@ class WebScraper
             $this->CI->Cotizacion_model->guardar_cotizacion($datos_cocos);
 
             // 5. Guardar todos los otros dólares
-            $this->guardar_cotizaciones_bancarias($otros_dolares);
+            $this->guardar_cotizaciones_bancarias($cotizaciones_unificadas);
             
             // 6. Verificar alertas SOLO cuando hay cambios en las cotizaciones
-            $alertas = $this->recolectar_alertas($cocos, $otros_dolares);
+            $alertas = $this->recolectar_alertas($cocos, $cotizaciones_unificadas);
             
             // 7. Enviar alertas por Telegram si existen alertas
             if (!empty($alertas)) {
@@ -72,6 +78,9 @@ class WebScraper
             } else {
                 log_message('info', "No se enviaron alertas porque ningún dólar cumple con el umbral configurado");
             }
+            
+            // 8. Actualizar fuentes preferidas según fiabilidad (auto-aprendizaje)
+            $this->dataSourceAggregator->actualizarFuentesPreferidas();
         } else {
             log_message('info', "No se detectaron cambios en las cotizaciones. No se actualizará la base de datos ni se enviarán alertas.");
         }
@@ -83,7 +92,7 @@ class WebScraper
      * Verifica si hay cambios en las cotizaciones comparando con las últimas registradas
      * @return bool TRUE si hay cambios, FALSE si no hay cambios
      */
-    private function verificar_cambios_cotizaciones($cocos, $otros_dolares)
+    private function verificar_cambios_cotizaciones($cocos, $cotizaciones_unificadas)
     {
         // Verificar si hay cambios en Cocos
         $ultima_cocos = $this->CI->Cotizacion_model->obtener_ultima_cotizacion('dolarya', 'cocos');
@@ -106,12 +115,15 @@ class WebScraper
         foreach ($dolares_habilitados as $dolar) {
             $codigo = $dolar->codigo;
             
-            // Omitir Cocos (ya verificado) y dólares no disponibles en la API
-            if ($codigo === 'cocos' || !isset($otros_dolares[$codigo])) {
+            // Omitir Cocos (ya verificado) y dólares no disponibles
+            if ($codigo === 'cocos' || !isset($cotizaciones_unificadas[$codigo])) {
                 continue;
             }
             
-            $ultima_cotizacion = $this->CI->Cotizacion_model->obtener_ultima_cotizacion('criptoya', $codigo);
+            $ultima_cotizacion = $this->CI->Cotizacion_model->obtener_ultima_cotizacion(
+                $cotizaciones_unificadas[$codigo]['source'], 
+                $codigo
+            );
             
             // Si no hay cotización previa, consideramos que hay cambios
             if (!$ultima_cotizacion) {
@@ -119,9 +131,8 @@ class WebScraper
             }
             
             // Datos del dólar actual
-            $dolar_info = $otros_dolares[$codigo];
-            $compra = isset($dolar_info['totalBid']) ? $dolar_info['totalBid'] : 0;
-            $venta = isset($dolar_info['totalAsk']) ? $dolar_info['totalAsk'] : 0;
+            $compra = $cotizaciones_unificadas[$codigo]['totalBid'];
+            $venta = $cotizaciones_unificadas[$codigo]['totalAsk'];
             
             // Verificar si hubo cambios
             if (abs($ultima_cotizacion->compra - $compra) > $tolerancia || 
@@ -137,33 +148,35 @@ class WebScraper
     /**
      * Guarda las cotizaciones de dólares bancarios en la base de datos
      */
-    private function guardar_cotizaciones_bancarias($otros_dolares)
+    private function guardar_cotizaciones_bancarias($cotizaciones_unificadas)
     {
-        $dolares_habilitados = $this->CI->Dolar_model->obtener_dolares_habilitados();
         $fecha_hora = date('Y-m-d H:i:s');
         
-        foreach ($dolares_habilitados as $dolar) {
-            $codigo = $dolar->codigo;
-            
-            // Omitir Cocos y dólares no disponibles en la API
-            if ($codigo === 'cocos' || !isset($otros_dolares[$codigo])) {
-                continue;
-            }
-            
-            // Datos del dólar a guardar
-            $dolar_info = $otros_dolares[$codigo];
-            $compra = isset($dolar_info['totalBid']) ? $dolar_info['totalBid'] : 0;
-            $venta = isset($dolar_info['totalAsk']) ? $dolar_info['totalAsk'] : 0;
-            
+        foreach ($cotizaciones_unificadas as $codigo => $cotizacion) {
+            // Guardar cotización en la tabla principal
             $datos_cotizacion = [
-                'fuente' => 'criptoya',
+                'fuente' => $cotizacion['source'],
                 'tipo' => $codigo,
-                'compra' => $compra,
-                'venta' => $venta,
+                'compra' => $cotizacion['totalBid'],
+                'venta' => $cotizacion['totalAsk'],
                 'fecha_hora' => $fecha_hora
             ];
             
-            $this->CI->Cotizacion_model->guardar_cotizacion($datos_cotizacion);
+            $id_cotizacion = $this->CI->Cotizacion_model->guardar_cotizacion($datos_cotizacion);
+            
+            // Guardar información adicional en el log de cotizaciones
+            $datos_log = [
+                'fecha_hora' => $fecha_hora,
+                'tipo' => $codigo,
+                'fuente_origen' => $cotizacion['source'],
+                'fuente_preferida' => $cotizacion['fuente_preferida'],
+                'compra' => $cotizacion['totalBid'],
+                'venta' => $cotizacion['totalAsk'],
+                'tiempo_consulta' => 0, // No tenemos este dato aquí
+                'fallback_usado' => $cotizacion['fallback_usado'] ? 1 : 0
+            ];
+            
+            $this->CI->db->insert('cotizaciones_log', $datos_log);
         }
     }
 
@@ -171,7 +184,7 @@ class WebScraper
      * Recolecta alertas de dólares que cumplen con el umbral de diferencia
      * @return array Alertas de dólares que cumplen la condición
      */
-    private function recolectar_alertas($cocos, $otros_dolares)
+    private function recolectar_alertas($cocos, $cotizaciones_unificadas)
     {
         // Obtener dólares habilitados de la base de datos
         $dolares_habilitados = $this->CI->Dolar_model->obtener_dolares_habilitados();
@@ -184,16 +197,15 @@ class WebScraper
         foreach ($dolares_habilitados as $dolar) {
             $codigo = $dolar->codigo;
 
-            // Verificar que el dólar esté disponible en la API
-            if (!isset($otros_dolares[$codigo])) {
-                log_message('info', "El dólar $codigo no está disponible en la API");
+            // Verificar que el dólar esté disponible en las cotizaciones unificadas
+            if ($codigo === 'cocos' || !isset($cotizaciones_unificadas[$codigo])) {
                 continue;
             }
 
             // Datos del dólar a comparar (punta vendedora totalAsk)
-            $dolar_info = $otros_dolares[$codigo];
-            $compra = isset($dolar_info['totalBid']) ? $dolar_info['totalBid'] : 0;
-            $venta = isset($dolar_info['totalAsk']) ? $dolar_info['totalAsk'] : 0;
+            $cotizacion = $cotizaciones_unificadas[$codigo];
+            $compra = $cotizacion['totalBid'];
+            $venta = $cotizacion['totalAsk'];
 
             // Calcular diferencia porcentual entre precio de venta del banco y compra de Cocos
             $diferencia = (($venta - $precio_cocos) / $precio_cocos) * 100;
@@ -207,7 +219,8 @@ class WebScraper
                     'compra' => $compra,
                     'venta' => $venta,
                     'diferencia' => $diferencia,
-                    'umbral' => $dolar->umbral_diferencia
+                    'umbral' => $dolar->umbral_diferencia,
+                    'fuente' => $cotizacion['source']
                 ];
                 
                 log_message('debug', "Dólar $codigo ($dolar->nombre) cumple el umbral con diferencia de $diferencia%");
@@ -289,48 +302,15 @@ class WebScraper
         log_message('error', "No se pudo encontrar la cotización de Dólar Cocos en DolarYa");
         return FALSE;
     }
-
+    
     /**
-     * Consulta las cotizaciones de dólares desde la API de CriptoYa
-     * @return array|bool Array con cotizaciones o FALSE si hubo un error
+     * Consulta las cotizaciones de CriptoYa (método para compatibilidad)
+     * 
+     * @return array|bool Datos de cotizaciones en formato de CriptoYa o FALSE en caso de error
      */
-    public function consultar_criptoya()
-    {
-        $curl = curl_init();
-
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "https://criptoya.com/api/bancostodos",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => "",
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => "GET",
-            CURLOPT_HTTPHEADER => [
-                "Accept: application/json",
-                "User-Agent: DolarMonitor/1.0"
-            ],
-        ]);
-
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
-
-        curl_close($curl);
-
-        if ($err) {
-            log_message('error', "Error al consultar API CriptoYa: " . $err);
-            return false;
-        }
-
-        // Decodificar la respuesta JSON
-        $data = json_decode($response, true);
-
-        if ($data === null) {
-            log_message('error', "Error al decodificar respuesta JSON de CriptoYa");
-            return false;
-        }
-
-        return $data;
+    public function consultar_criptoya() {
+        $criptoya_source = new CriptoYaDataSource();
+        return $criptoya_source->obtenerCotizaciones();
     }
 
     /**
@@ -350,10 +330,12 @@ class WebScraper
 
         foreach ($alertas as $alerta) {
             $diferencia_abs = abs($alerta['diferencia']);
+            $fuente = ucfirst($alerta['fuente']);
 
             $mensaje .= "📊 *{$alerta['nombre']}*\n";
             $mensaje .= "💵 Venta: $" . number_format($alerta['venta'], 2, ',', '.') . "\n";
-            $mensaje .= "💰 Ahorro: *" . number_format($diferencia_abs, 2, ',', '.') . "%*\n\n";
+            $mensaje .= "💰 Ahorro: *" . number_format($diferencia_abs, 2, ',', '.') . "%*\n";
+            $mensaje .= "📱 Fuente: _" . $fuente . "_\n\n";
         }
 
         $mensaje .= "📅 *Fecha*: " . date('d/m/Y H:i:s');

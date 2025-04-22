@@ -1,16 +1,25 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
 
+require_once APPPATH . 'libraries/DataSources/DataSourceAggregator.php';
+require_once APPPATH . 'libraries/DataSources/CriptoYaDataSource.php';
+require_once APPPATH . 'libraries/DataSources/InfoDolarDataSource.php';
+
 /**
  * Controlador de Pruebas
  * Este controlador proporciona endpoints para probar manualmente las funcionalidades del sistema
  */
 class Test extends CI_Controller {
     
+    protected $dataSourceAggregator;
+    
     public function __construct() {
         parent::__construct();
         $this->load->library('WebScraper');
         $this->load->helper('telegram');
+        
+        // Inicializar el agregador de fuentes de datos
+        $this->dataSourceAggregator = new DataSourceAggregator();
     }
     
     /**
@@ -22,6 +31,10 @@ class Test extends CI_Controller {
         // Obtener últimas cotizaciones
         $this->load->model('Cotizacion_model');
         $data['ultimas_cotizaciones'] = $this->Cotizacion_model->obtener_ultimas_por_tipo();
+        
+        // Obtener información de fiabilidad
+        $this->load->model('SourceReliability_model');
+        $data['resumen_fiabilidad'] = $this->SourceReliability_model->obtenerResumenFiabilidad();
         
         // Cargar vista
         $this->load->view('templates/header', $data);
@@ -47,7 +60,9 @@ class Test extends CI_Controller {
             $data['error'] = "No se pudo obtener cotización de dólar Cocos de DolarYa";
         } else {
             // 2. Obtener otros dólares
-            $otros_dolares = $this->webscraper->consultar_criptoya();
+            // Usar CriptoYaDataSource directamente en vez de webscraper->consultar_criptoya()
+            $criptoya_source = new CriptoYaDataSource();
+            $otros_dolares = $criptoya_source->obtenerCotizaciones();
             $data['otros_dolares'] = $otros_dolares;
             
             if (!$otros_dolares) {
@@ -103,6 +118,118 @@ class Test extends CI_Controller {
             $data['title'] = 'Resultado de Consulta - Monitor de Dólares';
             $this->load->view('templates/header', $data);
             $this->load->view('test/consultar', $data);
+            $this->load->view('templates/footer');
+        }
+    }
+    
+    /**
+     * Consulta datos de CriptoYa directamente
+     */
+    public function consultar_criptoya() {
+        $data['title'] = 'Prueba de CriptoYa - Monitor de Dólares';
+        
+        $criptoya_source = new CriptoYaDataSource();
+        $inicio = microtime(true);
+        $data['cotizaciones'] = $criptoya_source->obtenerCotizaciones();
+        $tiempo = round((microtime(true) - $inicio) * 1000); // Tiempo en milisegundos
+        
+        $data['tiempo_consulta'] = $tiempo;
+        $data['fuente'] = 'criptoya';
+        $data['bancos_disponibles'] = $criptoya_source->getBancosDisponibles();
+        
+        // Determinar tipo de respuesta según el parámetro
+        $format = $this->input->get('format');
+        
+        if ($format === 'json') {
+            // Respuesta JSON
+            $this->output
+                ->set_content_type('application/json')
+                ->set_output(json_encode([
+                    'cotizaciones' => $data['cotizaciones'],
+                    'tiempo_consulta' => $data['tiempo_consulta'],
+                    'bancos_disponibles' => $data['bancos_disponibles']
+                ]));
+        } else {
+            // Respuesta HTML
+            $this->load->view('templates/header', $data);
+            $this->load->view('test/consultar_fuente', $data);
+            $this->load->view('templates/footer');
+        }
+    }
+    
+    /**
+     * Consulta datos de InfoDolar directamente
+     */
+    public function consultar_infodolar() {
+        $data['title'] = 'Prueba de InfoDolar - Monitor de Dólares';
+        
+        $infodolar_source = new InfoDolarDataSource();
+        $inicio = microtime(true);
+        $data['cotizaciones'] = $infodolar_source->obtenerCotizaciones();
+        $tiempo = round((microtime(true) - $inicio) * 1000); // Tiempo en milisegundos
+        
+        $data['tiempo_consulta'] = $tiempo;
+        $data['fuente'] = 'infodolar';
+        $data['bancos_disponibles'] = $infodolar_source->getBancosDisponibles();
+        
+        // Determinar tipo de respuesta según el parámetro
+        $format = $this->input->get('format');
+        
+        if ($format === 'json') {
+            // Respuesta JSON
+            $this->output
+                ->set_content_type('application/json')
+                ->set_output(json_encode([
+                    'cotizaciones' => $data['cotizaciones'],
+                    'tiempo_consulta' => $data['tiempo_consulta'], 
+                    'bancos_disponibles' => $data['bancos_disponibles']
+                ]));
+        } else {
+            // Respuesta HTML
+            $this->load->view('templates/header', $data);
+            $this->load->view('test/consultar_fuente', $data);
+            $this->load->view('templates/footer');
+        }
+    }
+    
+    /**
+     * Consulta datos unificados de múltiples fuentes
+     */
+    public function consultar_multifuente() {
+        $data['title'] = 'Prueba Multifuente - Monitor de Dólares';
+        
+        $inicio = microtime(true);
+        
+        // Consultar todas las fuentes
+        $data['cotizaciones_por_fuente'] = $this->dataSourceAggregator->consultarTodasLasFuentes();
+        
+        // Obtener cotizaciones unificadas
+        $data['cotizaciones_unificadas'] = $this->dataSourceAggregator->obtenerCotizacionesUnificadas();
+        
+        $tiempo = round((microtime(true) - $inicio) * 1000); // Tiempo en milisegundos
+        
+        $data['tiempo_consulta'] = $tiempo;
+        
+        // Obtener dólar Cocos para comparaciones
+        $data['cocos'] = $this->webscraper->consultar_dolarya_cocos();
+        
+        // Determinar tipo de respuesta según el parámetro
+        $format = $this->input->get('format');
+        
+        if ($format === 'json') {
+            // Respuesta JSON
+            $this->output
+                ->set_content_type('application/json')
+                ->set_output(json_encode([
+                    'cotizaciones_por_fuente' => $data['cotizaciones_por_fuente'],
+                    'cotizaciones_unificadas' => $data['cotizaciones_unificadas'],
+                    'tiempo_consulta' => $data['tiempo_consulta'],
+                    'cocos' => $data['cocos']
+                ]));
+        } else {
+            // Respuesta HTML
+            $this->load->view('templates/header', $data);
+            $this->load->view('test/consultar_multifuente', $data);
             $this->load->view('templates/footer');
         }
     }
