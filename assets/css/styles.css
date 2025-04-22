@@ -1,0 +1,46 @@
+/* assets/css/styles.css */
+body {
+    padding-top: 4.5rem;
+}
+.bd-placeholder-img {
+    font-size: 1.125rem;
+    text-anchor: middle;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+}
+.navbar-brand {
+    font-weight: 600;
+}
+.card {
+    margin-bottom: 1.5rem;
+}
+.badge.bg-up {
+    background-color: #dc3545 !important;
+}
+.badge.bg-down {
+    background-color: #198754 !important;
+}
+.table-cotizaciones th {
+    white-space: nowrap;
+}
+.chart-container {
+    position: relative;
+    height: 200px;
+    width: 100%;
+}
+.btn-group-actions .btn {
+    margin-right: 3px;
+}
+.btn-group-actions .btn:last-child {
+    margin-right: 0;
+}
+.dolares-table tbody tr:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+}
+.chart-container {
+    position: relative;
+    height: 500px; /* Aumentando la altura del gráfico */
+    width: 100%;
+    margin-bottom: 15px;
+}
