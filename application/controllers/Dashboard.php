@@ -32,8 +32,6 @@ class Dashboard extends CI_Controller {
             }
         }
         
-        $data['ultimas_cotizaciones'] = $cotizaciones_filtradas;
-        
         // Encontrar el dólar cocos para comparar
         $cocos = null;
         foreach ($cotizaciones_filtradas as $cotizacion) {
@@ -43,6 +41,29 @@ class Dashboard extends CI_Controller {
             }
         }
         $data['cocos'] = $cocos;
+        
+        // Separar cocos de los otros dólares (igual que en ajax_cotizaciones)
+        $otros_dolares = [];
+        foreach ($cotizaciones_filtradas as $cotizacion) {
+            if ($cotizacion->tipo !== 'cocos') {
+                $otros_dolares[] = $cotizacion;
+            }
+        }
+        
+        // Ordenar por precio de venta (de menor a mayor)
+        usort($otros_dolares, function($a, $b) {
+            return $a->venta - $b->venta;
+        });
+        
+        // Reconstruir el array con cocos primero y luego los otros ordenados
+        $todas_ordenadas = [];
+        if ($cocos) {
+            $todas_ordenadas[] = $cocos;
+        }
+        $todas_ordenadas = array_merge($todas_ordenadas, $otros_dolares);
+        
+        // Actualizar las cotizaciones con las ordenadas
+        $data['ultimas_cotizaciones'] = $todas_ordenadas;
         
         // Obtener configuraciones
         $data['config'] = $this->Configuracion_model->obtener_configuraciones();

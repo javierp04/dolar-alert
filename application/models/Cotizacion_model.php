@@ -101,10 +101,25 @@ class Cotizacion_model extends CI_Model
         return $query->result();
     }
 
+    /**
+     * Obtiene la última cotización para una fuente y tipo específicos
+     * @param string $fuente Fuente de la cotización (dolarya, criptoya, etc.)
+     * @param string $tipo Tipo de cotización (cocos, bbva, etc.)
+     * @return object|null Último registro de cotización o NULL si no existe
+     */
     public function obtener_ultima_cotizacion($fuente, $tipo)
     {
-        return $this->db->order_by('fecha_hora', 'desc')
-            ->get_where('cotizaciones', ['fuente' => $fuente, 'tipo' => $tipo], 1)
-            ->row();
+        $this->db->where('fuente', $fuente)
+                 ->where('tipo', $tipo)
+                 ->order_by('fecha_hora', 'DESC')
+                 ->limit(1);
+        
+        $query = $this->db->get('cotizaciones');
+        
+        if ($query->num_rows() > 0) {
+            return $query->row();
+        }
+        
+        return null;
     }
 }
